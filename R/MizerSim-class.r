@@ -107,6 +107,8 @@ valid_MizerSim <- function(object){
 #' @slot params An object of type \linkS4class{MizerParams}.
 #' @slot n Array that stores the projected community population abundances by
 #'   time, species and size
+#' @slot tau Array that stores the projected activity level by
+#'   time, species and size
 #' @slot effort Array that stores the fishing effort through time by time and
 #'   gear
 #' @slot n_pp Array that stores the projected background population by time and
@@ -119,6 +121,7 @@ setClass(
     representation(
         params = "MizerParams",
         n = "array",
+        tau = "array",
         effort = "array",
         n_pp = "array"
     ),
@@ -126,6 +129,9 @@ setClass(
         params = new("MizerParams"),
         n = array(
             NA,dim = c(1,1,1), dimnames = list(time = NULL, sp = NULL, w = NULL)
+        ),
+        tau = array(
+          NA,dim = c(1,1,1), dimnames = list(time = NULL, sp = NULL, w = NULL)
         ),
         effort = array(
             NA,dim = c(1,1), dimnames = list(time = NULL, gear = NULL)
@@ -196,6 +202,10 @@ setMethod('MizerSim', signature(object='MizerParams'),
         array_n <- array(NA, dim = c(t_dim_n, no_sp, no_w), 
                          dimnames = list(time = t_dimnames_n, 
                                          sp = species_names, w = w_names))
+        
+        array_tau <- array(NA, dim = c(t_dim_n, no_sp, no_w), 
+                         dimnames = list(time = t_dimnames_n, 
+                                         sp = species_names, w = w_names))
 
         no_gears <- dim(object@selectivity)[1]
         gear_names <- dimnames(object@selectivity)$gear
@@ -211,6 +221,7 @@ setMethod('MizerSim', signature(object='MizerParams'),
 
         sim <- new('MizerSim',
                n = array_n, 
+               tau = array_tau, 
                effort = array_effort,
                n_pp = array_n_pp,
                params = object)

@@ -296,6 +296,8 @@ setClass(
         species_params = "data.frame",
         interaction = "array",
         srr  = "function",
+        O2_supply = 'function',
+        get_tc = "function",
         selectivity = "array",
         catchability = "array"
     ),
@@ -365,6 +367,7 @@ setClass(
 #'     \item{\code{n} Scaling of the intake. Default value is 2/3} 
 #'     \item{\code{p} Scaling of the standard metabolism. Default value is 0.7} 
 #'     \item{\code{q} Exponent of the search volume. Default value is 0.8} 
+#'     \item{\code{delta} The time scale of adaptive foraging dynamics} 
 #'     \item{\code{r_pp} Growth rate of the primary productivity. Default value is 10} 
 #'     \item{\code{kappa} Carrying capacity of the resource spectrum. Default
 #'       value is 1e11}
@@ -460,7 +463,8 @@ setMethod('MizerParams', signature(object='numeric', interaction='missing'),
 
 	# Make an empty srr function, just to pass validity check
 	srr <- function(rdi, species_params) return(0)
-
+	O2_supply <- function(n=n) return(0)
+	get_tc <- function(Ea,tref) return(0)
 	# Make the new object
 	# Should Z0, rrPP and ccPP have names (species names etc)?
 	res <- new("MizerParams",
@@ -468,7 +472,7 @@ setMethod('MizerParams', signature(object='numeric', interaction='missing'),
 	    psi = mat1, intake_max = mat1, search_vol = mat1, activity = mat1, std_metab = mat1, pred_kernel = mat2,
 	    selectivity=selectivity, catchability=catchability,
 	    rr_pp = vec1, cc_pp = vec1, species_params = species_params,
-	    interaction = interaction, srr = srr) 
+	    interaction = interaction, srr = srr, O2_supply = O2_supply, get_tc = get_tc) 
 	return(res)
     }
 )
@@ -477,7 +481,7 @@ setMethod('MizerParams', signature(object='numeric', interaction='missing'),
 #' @describeIn MizerParams
 setMethod('MizerParams', signature(object='data.frame', interaction='matrix'),
     function(object, interaction,  n = 2/3, p = 0.7, q = 0.8, r_pp = 10, 
-             kappa = 1e11, lambda = (2+q-n), w_pp_cutoff = 10, 
+             kappa = 1e11, lambda = (2+q-n), Ea=0.52,tref=15,w_pp_cutoff = 10, 
              max_w = max(object$w_inf)*1.1, f0 = 0.6, 
              z0pre = 0.6, z0exp = n-1, ...){
 
@@ -488,7 +492,10 @@ setMethod('MizerParams', signature(object='data.frame', interaction='matrix'),
 	no_gear <- length(unique(object$gear))
 	# If no k column (activity coefficient) in object, then set to 0
 	if(!("k" %in% colnames(object)))
-	    object$k <- 0
+	    object$k <- 4
+	# If no delta column (adaptive coefficient) in object, then set to 0
+	if(!("delta" %in% colnames(object)))
+	  object$delta <- 1
 	# If no alpha column in object, then set to 0.6
     # Should this be a column? Or just an argument?
 	if(!("alpha" %in% colnames(object)))
@@ -582,13 +589,13 @@ setMethod('MizerParams', signature(object='data.frame', interaction='matrix'),
 
 	res@intake_max[] <- unlist(tapply(res@w,1:length(res@w),function(wx,h,n)h * wx^n,h=object$h,n=n))
 	res@search_vol[] <- unlist(tapply(res@w,1:length(res@w),function(wx,gamma,q)gamma * wx^q, gamma=object$gamma, q=q))
-	res@activity[] <-  unlist(tapply(res@w,1:length(res@w),function(wx,k)k * wx,k=object$k))
+	res@activity[] <-  unlist(tapply(res@w,1:length(res@w),function(wx,k)k * (wx*0+1),k=object$k))
 	res@std_metab[] <-  unlist(tapply(res@w,1:length(res@w),function(wx,ks,p)ks * wx^p, ks=object$ks,p=p))
 	# Could maybe improve this. Pretty ugly at the moment
 	res@pred_kernel[] <- object$beta
 	res@pred_kernel <- exp(-0.5*sweep(log(sweep(sweep(res@pred_kernel,3,res@w_full,"*")^-1,2,res@w,"*")),1,object$sigma,"/")^2)
 	res@pred_kernel <- sweep(res@pred_kernel,c(2,3),combn(res@w_full,1,function(x,w)x<w,w=res@w),"*") # find out the untrues and then multiply
-
+	
 
 	# Background spectrum
 	res@rr_pp[] <- r_pp * res@w_full^(n-1) #weight specific plankton growth rate ##
@@ -600,6 +607,9 @@ setMethod('MizerParams', signature(object='data.frame', interaction='matrix'),
 	    return(species_params$r_max * rdi / (species_params$r_max+rdi))
 	}
 
+	res@O2_supply <- O2_supplyer(n=n)
+	res@get_tc <- temp_corr(Ea=Ea,t_ref=tref)
+	
 	# Set fishing parameters: selectivity and catchability
 	# At the moment, each species is only caught by 1 gear so in species_params
 	# there are the columns: gear_name and sel_func.
@@ -658,3 +668,33 @@ check_species_params_dataframe <- function(species_params){
     return(TRUE)
 }
 
+
+#' @export
+temp_corr <-  function(temp, Ea,t_ref) {
+  function(temp) {
+    exp(Ea*((temp+273.2)-(273.2+t_ref))/(8.6173324*10^(-5)*(temp+(273.2+t_ref))*(273.2+t_ref)))
+}}
+
+#' @export
+O2_supplyer <- function(T,O2crit,
+                        P50, 
+                        Tmax,
+                        Topt,
+                        om,
+                        de,
+                        n){
+  
+  function(T,O2crit,
+           P50, 
+           Tmax,
+           Topt,
+           om,
+           de,
+           dt){
+    O2 <- 10*exp(-0.01851*(T-5))
+    
+    level <- de*((Tmax-T)/(Tmax-Topt))^om*exp(-om*(Tmax-T)/(Tmax-Topt))
+    dt*365*24*level*(1-exp(-(O2-O2crit)/(-(P50-O2crit)/log(0.5))))/(1000*100^n)
+  }
+  
+}

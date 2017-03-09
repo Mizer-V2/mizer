@@ -201,9 +201,12 @@ set_community_model <- function(max_w = 1e6,
 #' @param kappa Carrying capacity of the resource spectrum. Default value is
 #'   0.005.
 #' @param lambda Exponent of the resource spectrum. Default value is (2+q-n).
-#' @param alpha The assimilation efficiency of the community. The default value
-#'   is 0.6
+#' @param alpha SDA
+#' @param phi excretion
+#' @param omega oxygen required per g of cabon metabolised
 #' @param ks Standard metabolism coefficient. Default value is 4.
+#' @param k Activity multiplyer. Default value is 4.
+#' @param delta Time scale of adaptive foraging dynamics. Default value is 1.
 #' @param z0pre The coefficient of the background mortality of the community. z0
 #'   = z0pre * w_inf ^ (n-1). The default value is 0.6.
 #' @param h Maximum food intake rate. Default value is 30.
@@ -263,9 +266,13 @@ set_trait_model <- function(no_sp = 10,
                             eta = 0.25,
                             r_pp = 4,
                             kappa = 0.005,
+                            omega=0.4,
                             lambda = 2+q-n,
-                            alpha = 0.6,
+                            alpha = 0.15,
+                            phi=0.25,
                             ks = 4,
+                            k = 4,
+                            delta = 1,
                             z0pre = 0.6,
                             h = 30,
                             beta = 100,
@@ -274,6 +281,14 @@ set_trait_model <- function(no_sp = 10,
                             gamma = NA,
                             knife_edge_size = 1000,
                             gear_names = "knife_edge_gear",
+                            O2_crit = 2,
+                            O_2_P50 = 8,
+                            Tmax = 30,
+                            Topt = 15,
+                            om = 1.87,
+                            de = 1038,
+                            Ea = 0.52,
+                            tref = 15,
                             ...){
     # If not supplied, calculate gamma using equation 2.1 in A&P 2010
     if(is.na(gamma)){
@@ -302,18 +317,45 @@ set_trait_model <- function(no_sp = 10,
             h = h, # max food intake
             gamma = gamma, # vol. search rate,
             ks = ks,# standard metabolism coefficient,
+            k = k,# standard metabolism coefficient,
+            omega= omega,
+            n=n,
+            p=p,
+            q=q,
+            delta = delta,
             beta = beta,
             sigma = sigma,
             z0 = z0pre * w_inf^(n-1), # background mortality
             alpha = alpha,
+            phi = phi,
             #r_max = r_max,
             sel_func = "knife_edge",
             knife_edge_size = knife_edge_size,
             gear = gear_names,
+            O2_crit = O2_crit,
+            O_2_P50 = O_2_P50,
+            Tmax = Tmax,
+            Topt = Topt,
+            om = om,
+            de = de,
             erepro = 1 # not used but included out of necessity
     )
     # Make the MizerParams
-    trait_params <- MizerParams(trait_params_df, min_w = min_w, max_w=max_w, no_w = no_w, min_w_pp = min_w_pp, w_pp_cutoff = w_pp_cutoff, n = n, p=p, q=q, r_pp=r_pp, kappa=kappa, lambda = lambda) 
+    trait_params <- MizerParams(trait_params_df, 
+                                min_w = min_w, 
+                                max_w=max_w, 
+                                no_w = no_w, 
+                                min_w_pp = min_w_pp, 
+                                w_pp_cutoff = w_pp_cutoff, 
+                                n = n, 
+                                p=p, 
+                                q=q, 
+                                r_pp=r_pp,
+                                Ea=Ea,
+                                tref=tref, 
+                                kappa=kappa, 
+                                lambda = lambda) 
+    
     # Sort out maximum recruitment - see A&P 2009
     # Get max flux at recruitment boundary, R_max
     # R -> | -> g0 N0

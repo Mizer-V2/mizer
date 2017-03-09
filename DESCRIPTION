@@ -3,7 +3,8 @@ Imports:
     methods,
     plyr,
     reshape2,
-    ggplot2
+    ggplot2,
+    numDeriv
 Maintainer: Finlay Scott <finlay.scott@jrc.ec.europa.eu>
 Author: Finlay Scott (JRC, IT) and Julia Blanchard (Sheffield University, UK)
     and Ken Andersen (DTU Aqua, Copenhagen, DK)
@@ -31,5 +32,5 @@ Collate:
     'plots.r'
     'wrapper_functions.R'
     'NS_species_params-data.R'
-VignetteBuilder: 
-    knitr
+VignetteBuilder: knitr
+RoxygenNote: 6.0.1

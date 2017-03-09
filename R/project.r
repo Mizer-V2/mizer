@@ -30,7 +30,8 @@
 #'   should be a numeric vector of the same length as the \code{w_full} slot of
 #'   the \code{MizerParams} argument. By default the \code{cc_pp} slot of the
 #'   \code{\link{MizerParams}} argument is used.
-#' 
+#' @param adapt_activity Use adaptive activity dynamics? Defauylts to TRUE
+#' @param temp temperature time series used for correction and O2 limitation
 #' @note The \code{effort} argument specifies the level of fishing effort during
 #' the simulation. It can be specified in three different ways: \itemize{ \item
 #' A single numeric value. This specifies the effort of all fishing gears which
@@ -54,6 +55,9 @@
 #' the initial population is not specified, the argument is set by default by
 #' the \code{get_initial_n} function which is set up for a North Sea model.
 #' @return An object of type \code{MizerSim}.
+#' if ((length(effort) != no_gear & !is.matrix(effort)) || (!is.null(dim(effort)) && dim(effort)[2] != no_gear))
+#' @importFrom numDeriv grad
+#' @import progress
 #' @export
 #' @seealso \code{\link{MizerParams}}
 #' @examples
@@ -120,7 +124,7 @@ setMethod('project', signature(object='MizerParams', effort='numeric'),
 
 #' @describeIn project
 setMethod('project', signature(object='MizerParams', effort='array'),
-    function(object, effort, t_save=1, dt=0.1, initial_n=get_initial_n(object), initial_n_pp=object@cc_pp,  ...){
+    function(object, effort, temp=NULL, t_save=1, dt=0.1, initial_n=get_initial_n(object), initial_n_pp=object@cc_pp, adapt_activity=T){
         validObject(object)
         # Check that number and names of gears in effort array is same as in MizerParams object
         no_gears <- dim(object@catchability)[1]
@@ -129,7 +133,7 @@ setMethod('project', signature(object='MizerParams', effort='array'),
             stop(no_gears_error_message)
         }
         gear_names <- dimnames(object@catchability)[[1]]
-        if(!all(gear_names %in% dimnames(effort)[[2]])){
+          if(!all(gear_names %in% dimnames(effort)[[2]])){
             gear_names_error_message <- paste("Gear names in the MizerParams object (", paste(gear_names, collapse=", "), ") do not match those in the effort array.", sep="")
             stop(gear_names_error_message)
         }
@@ -146,6 +150,14 @@ setMethod('project', signature(object='MizerParams', effort='array'),
         }
         time_effort <- as.numeric(dimnames(effort)[[1]])
         t_max <- time_effort[length(time_effort)]
+        
+        if(!is.null(temp)){
+          if(length(temp)==t_max) {
+            temp_correct = T 
+            temp_dt <- approx(temp,n=length(seq(from = time_effort[1], to = t_max, by = dt)))[[2]]
+            } else stop("temp needs to be a vector the length of t")
+        } else temp_correct = F
+        
         # Blow up effort so that rows are dt spaced
         time_effort_dt <- seq(from = time_effort[1], to = t_max, by = dt)
         effort_dt <- t(array(NA, dim = c(length(time_effort_dt), dim(effort)[2]), dimnames=list(time = time_effort_dt, dimnames(effort)[[2]])))
@@ -168,9 +180,11 @@ setMethod('project', signature(object='MizerParams', effort='array'),
 
         # Set initial population
         sim@n[1,,] <- initial_n 
+        sim@tau[1,,] <- ifelse(adapt_activity==T,0.1,1)
         sim@n_pp[1,] <- initial_n_pp
 
         # Handy things
+        delta <- sim@params@species_params$delta#*dt
         no_sp <- nrow(sim@params@species_params) # number of species
         no_w <- length(sim@params@w) # number of fish size bins
         idx <- 2:no_w
@@ -193,29 +207,37 @@ setMethod('project', signature(object='MizerParams', effort='array'),
         # initialise n and nPP
         # We want the first time step only but cannot use drop as there may only be a single species
         n <- array(sim@n[1,,],dim=dim(sim@n)[2:3])
+        tau <- array(sim@tau[1,,],dim=dim(sim@tau)[2:3])
         dimnames(n) <- dimnames(sim@n)[2:3]
         n_pp <- sim@n_pp[1,]
         t_steps <- dim(effort_dt)[1]
-        for (i_time in 1:t_steps){
+        pb <- progress_bar$new(total = t_steps)
+        
+        for (i_time in 1:t_steps){ 
+          
+            pb$tick()
+          
+          #if(i_time> 250) browser()
             # Do it piece by piece to save repeatedly calling methods
+            if(adapt_activity==T) tau <- getTau(sim@params, n=n, n_pp=n_pp, tau = tau, delta = delta, dt = dt,temp_correct = temp_correct,temp = temp_dt[i_time])
             # Calculate amount E_{a,i}(w) of available food
-            phi_prey <- getPhiPrey(sim@params, n=n, n_pp=n_pp)
+            phi_prey <- getPhiPrey(sim@params, n=n, n_pp=n_pp, tau = tau)
             # Calculate amount f_i(w) of food consumed
-            feeding_level <- getFeedingLevel(sim@params, n=n, n_pp=n_pp, phi_prey=phi_prey)
+            feeding_level <- getFeedingLevel(sim@params, n=n, n_pp=n_pp, phi_prey=phi_prey, tau = tau)
             # Calculate the predation rate
-            pred_rate <- getPredRate(sim@params, n=n, n_pp=n_pp, feeding_level=feeding_level)
+            pred_rate <- getPredRate(sim@params, n=n, n_pp=n_pp, feeding_level=feeding_level, tau = tau)
             # Calculate predation mortality on fish \mu_{p,i}(w)
-            m2 <- getM2(sim@params, n=n, n_pp=n_pp, pred_rate=pred_rate)
+            m2 <- getM2(sim@params, n=n, n_pp=n_pp, pred_rate=pred_rate, tau = tau)
             # Calculate total mortality \mu_i(w)
-            z <- getZ(sim@params, n=n, n_pp=n_pp, effort=effort_dt[i_time,], m2=m2)
+            z <- getZ(sim@params, n=n, n_pp=n_pp, effort=effort_dt[i_time,], m2=m2, tau = tau)
             # Calculate predation mortality on the background spectrum
-            m2_background <- getM2Background(sim@params, n=n, n_pp=n_pp, pred_rate=pred_rate)
+            m2_background <- getM2Background(sim@params, n=n, n_pp=n_pp, pred_rate=pred_rate, tau = tau)
             # Calculate the resources available for reproduction and growth
-            e <- getEReproAndGrowth(sim@params, n=n, n_pp=n_pp, feeding_level=feeding_level)
+            e <- getEReproAndGrowth(sim@params, n=n, n_pp=n_pp, feeding_level=feeding_level, tau = tau)
             # Calculate the resources for reproduction
-            e_spawning <- getESpawning(sim@params, n=n, n_pp=n_pp, e=e)
+            e_spawning <- getESpawning(sim@params, n=n, n_pp=n_pp, e=e, tau = tau)
             # Calculate the growth rate g_i(w)
-            e_growth <- getEGrowth(sim@params, n=n, n_pp=n_pp, e_spawning=e_spawning, e=e)
+            e_growth <- getEGrowth(sim@params, n=n, n_pp=n_pp, e_spawning=e_spawning, e=e, tau = tau)
             # R_{p,i}
             rdi <- getRDI(sim@params, n=n, n_pp=n_pp, e_spawning=e_spawning, sex_ratio=sex_ratio)
             # R_i
@@ -234,10 +256,10 @@ setMethod('project', signature(object='MizerParams', effort='array'),
             # Update first size group of n
             n[w_min_idx_array_ref] <- (n[w_min_idx_array_ref] + rdd*dt/sim@params@dw[sim@params@species_params$w_min_idx]) / B[w_min_idx_array_ref]
             # Update n
-            for (i in 1:no_sp) # number of species assumed small, so no need to vectorize this loop over species
-                for (j in (sim@params@species_params$w_min_idx[i]+1):no_w)
-                    n[i,j] <- (S[i,j] - A[i,j]*n[i,j-1]) / B[i,j]
-
+            for (i in 1:no_sp) {# number of species assumed small, so no need to vectorize this loop over species
+              sp_w <- (sim@params@species_params$w_min_idx[i]+1):no_w     
+              n[i,sp_w] <- (S[i,sp_w] - A[i,sp_w]*n[i,sp_w-1]) / B[i,sp_w]
+            }
             # Dynamics of background spectrum uses a semi-chemostat model (de Roos - ask Ken)
             # We use the exact solution under the assumption of constant mortality during timestep
             tmp <- (sim@params@rr_pp * sim@params@cc_pp / (sim@params@rr_pp + m2_background))
@@ -247,6 +269,7 @@ setMethod('project', signature(object='MizerParams', effort='array'),
             store <- t_dimnames_index %in% i_time
             if (any(store)){
                 sim@n[which(store)+1,,] <- n 
+                sim@tau[which(store)+1,,] <- tau
                 sim@n_pp[which(store)+1,] <- n_pp
             }
         }

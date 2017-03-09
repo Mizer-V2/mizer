@@ -30,6 +30,8 @@
 #'   
 #' @return A ggplot2 object
 #' @export
+#' @importFrom reshape2 melt
+#' @importFrom cowplot theme_cowplot
 #' @seealso \code{\link{getBiomass}}
 #' @examples
 #' \dontrun{
@@ -52,22 +54,102 @@ setMethod('plotBiomass', signature(object='MizerSim'),
             stop("start_time must be less than end_time")
         }
         b <- b[(as.numeric(dimnames(b)[[1]]) >= start_time) & (as.numeric(dimnames(b)[[1]]) <= end_time),,drop=FALSE]
-        bm <- melt(b)
+        bm <- reshape2::melt(b)
         # Force Species column to be a character (if numbers used - may be
         # interpreted as integer and hence continuous)
         bm$Species <- as.character(bm$Species)
         # Due to log10, need to set a minimum value, seems like a feature in ggplot
         min_value <- 1e-300
         bm <- bm[bm$value >= min_value,]
-        p <- ggplot(bm) + geom_line(aes(x=time,y=value, colour=Species, linetype=Species)) + scale_y_continuous(trans="log10", name="Biomass") + scale_x_continuous(name="Time") 
+        p <- ggplot(bm) + 
+          geom_line(aes(x=time,y=value, colour=Species, linetype=Species)) + 
+          scale_y_continuous(trans="log10", name="Biomass") + 
+          scale_x_continuous(name="Time") +
+          theme_cowplot()
+          
         if (nrow(object@params@species_params)>12){
-        p <- ggplot(bm) + geom_line(aes(x=time,y=value, group=Species)) + scale_y_continuous(trans="log10", name="Biomass") + scale_x_continuous(name="Time") 
+        p <- ggplot(bm) + 
+          geom_line(aes(x=time,y=value, group=Species)) + 
+          scale_y_continuous(trans="log10", name="Biomass") + 
+          scale_x_continuous(name="Time") +
+          theme_cowplot()
         }
         if (print_it)
             print(p)
         return(p)
     }
 )
+
+
+#' Plot the activity level of each species through time
+#'
+#' After running a projection, the activity level of each species can be plotted
+#' against time. The activity is calculated within user defined size limits (see
+#' \code{\link{getTau}}).
+#' 
+#' @param object An object of class \code{MizerSim}.
+#' @param min_w Minimum weight of species to be used in the calculation.
+#' @param max_w Maximum weight of species to be used in the calculation.
+#' @param min_l Minimum length of species to be used in the calculation.
+#' @param max_l Maximum length of species to be used in the calculation.
+#' @param start_time The first time step to be plotted. Default is the beginning
+#'   of the time series.
+#' @param end_time The first time step to be plotted. Default is the end of the
+#'   time series.
+#' @param print_it Display the plot, or just return the ggplot2 object. Default
+#'   value is TRUE.
+#'   
+#' @return A ggplot2 object
+#' @export
+#' @importFrom reshape2 melt
+#' @importFrom cowplot theme_cowplot
+#' @seealso \code{\link{getBiomass}}
+#' @examples
+#' \dontrun{
+#' data(NS_species_params_gears)
+#' data(inter)
+#' params <- MizerParams(NS_species_params_gears, inter)
+#' sim <- project(params, effort=1, t_max=20, t_save = 2)
+#' plotBiomass(sim)
+#' plotBiomass(sim, min_w = 10, max_w = 1000)
+#' }
+setGeneric('plotTau', function(object, ...)
+  standardGeneric('plotTau'))
+
+#' @describeIn plotTau
+setMethod('plotTau', signature(object='MizerSim'),
+          function(object, print_it=TRUE, start_time=as.numeric(dimnames(object@n)[[1]][1]), end_time = as.numeric(dimnames(object@n)[[1]][dim(object@n)[1]]), ...){
+            b <- getTaus(object,...)
+            names(dimnames(b))[names(dimnames(b))=="sp"] <- "Species"
+            if(start_time >= end_time){
+              stop("start_time must be less than end_time")
+            }
+            b <- b[(as.numeric(dimnames(b)[[1]]) >= start_time) & (as.numeric(dimnames(b)[[1]]) <= end_time),,drop=FALSE]
+            bm <- reshape2::melt(b)
+            # Force Species column to be a character (if numbers used - may be
+            # interpreted as integer and hence continuous)
+            bm$Species <- as.character(bm$Species)
+            # Due to log10, need to set a minimum value, seems like a feature in ggplot
+            #min_value <- 1e-300
+            #bm <- bm[bm$value >= min_value,]
+            p <- ggplot(bm, aes(x=time,y=value, colour=Species, linetype=Species)) + 
+              geom_line() + 
+              scale_y_continuous( name=expression(tau)) + 
+              scale_x_continuous(name="Time") +
+              theme_cowplot()
+            if (nrow(object@params@species_params)>12){
+              p <- ggplot(bm) + 
+                geom_line(aes(x=time,y=value, group=Species)) + 
+                scale_y_continuous( name=expression(tau)) + 
+                scale_x_continuous(name="Time") +
+                theme_cowplot()
+            }
+            if (print_it)
+              print(p)
+            return(p)
+          }
+)
+
 
 #' Plot the total yield of each species through time
 #'
@@ -203,9 +285,18 @@ setMethod('plotSpectra', signature(object='MizerSim'),
         plot_dat <- rbind(plot_dat, data.frame(value = c(background_n), Species = "Background", w = object@params@w_full))
         # lop off 0s in background and apply min_w
         plot_dat <- plot_dat[(plot_dat$value > 0) & (plot_dat$w >= min_w),]
-        p <- ggplot(plot_dat) + geom_line(aes(x=w, y = value, colour = Species, linetype=Species)) + scale_x_continuous(name = "Size", trans="log10") + scale_y_continuous(name = y_axis_name, trans="log10")
+        plot_dat$value[plot_dat$value<1e-20] <- NA
+        p <- ggplot(plot_dat) + 
+          geom_line(aes(x=w, y = value, colour = Species, linetype=Species)) + 
+          scale_x_continuous(name = "Size", trans="log10") + 
+          scale_y_continuous(name = y_axis_name, trans="log10") + 
+          theme_cowplot()
         if (nrow(object@params@species_params)>12){
-            p <- ggplot(plot_dat) + geom_line(aes(x=w, y = value, group = Species)) + scale_x_continuous(name = "Size", trans="log10") + scale_y_continuous(name = y_axis_name, trans="log10")
+            p <- ggplot(plot_dat) + 
+              geom_line(aes(x=w, y = value, group = Species)) + 
+              scale_x_continuous(name = "Size", trans="log10") + 
+              scale_y_continuous(name = y_axis_name, trans="log10")+ 
+              theme_cowplot()
         }
         if (print_it)
             print(p)
@@ -244,12 +335,34 @@ setGeneric('plotFeedingLevel', function(object, ...)
 #' @describeIn plotFeedingLevel
 setMethod('plotFeedingLevel', signature(object='MizerSim'),
     function(object, time_range = max(as.numeric(dimnames(object@n)$time)), print_it = TRUE, ...){
-        feed_time <- getFeedingLevel(object=object, time_range=time_range, drop=FALSE, ...)
+        feed_time <- getFeedingLevelDynamics(object=object, time_range=time_range, drop=FALSE, ...)
         feed <- apply(feed_time, c(2,3), mean)
+        
         plot_dat <- data.frame(value = c(feed), Species = dimnames(feed)[[1]], w = rep(object@params@w, each=nrow(object@params@species_params)))
-        p <- ggplot(plot_dat) + geom_line(aes(x=w, y = value, colour = Species, linetype=Species)) + scale_x_continuous(name = "Size", trans="log10") + scale_y_continuous(name = "Feeding Level", lim=c(0,1))
+        
+        time_elements <- get_time_elements(object,time_range)
+        taus <- apply(object@tau[time_elements,,,drop=FALSE],c(2,3), mean)
+        feed_c <-(object@params@std_metab*(1+taus*object@params@activity))/(object@params@intake_max*(1-object@params@species_params$alpha*object@params@species_params$phi))
+        feed_c_plot <- data.frame(feed_c = c(feed_c), Species = dimnames(feed)[[1]] , w = rep(object@params@w, each=nrow(object@params@species_params)))
+        
+        taus_plot <- data.frame(tau = c(taus), Species = dimnames(feed)[[1]] , w = rep(object@params@w, each=nrow(object@params@species_params)))
+        
+        p <- ggplot() + 
+          geom_line(aes(x=w, y = value, colour = Species),data=plot_dat) + 
+          geom_line(aes(x=w, y = feed_c, colour = Species),linetype=2,data=feed_c_plot) + 
+          geom_line(aes(x=w, y = tau, colour = Species),linetype=3,data=taus_plot) + 
+          annotate("text", x = taus_plot$w[which.max(taus_plot$tau)]*0.1, y = max(taus_plot$tau)-0.02, label = "Activity") +
+          annotate("text", x = feed_c_plot$w[which.min(feed_c_plot$feed_c)]*10, y = min(feed_c_plot$feed_c)-0.02, label = "Critical f") +
+          scale_x_continuous(name = "Size", trans="log10") + 
+          scale_y_continuous(name = "Feeding Level", lim=c(0,1))+
+          theme_cowplot()
+        
         if (nrow(object@params@species_params)>12){
-            p <- ggplot(plot_dat) + geom_line(aes(x=w, y = value, group = Species)) + scale_x_continuous(name = "Size", trans="log10") + scale_y_continuous(name = "Feeding Level", lim=c(0,1))
+            p <- ggplot(plot_dat) + 
+              geom_line(aes(x=w, y = value, group = Species)) + 
+              scale_x_continuous(name = "Size", trans="log10") + 
+              scale_y_continuous(name = "Feeding Level", lim=c(0,1))+
+              theme_cowplot()
         }
         if (print_it)
             print(p)
@@ -332,7 +445,7 @@ setGeneric('plotFMort', function(object, ...)
 #' @describeIn plotFMort
 setMethod('plotFMort', signature(object='MizerSim'),
     function(object, time_range = max(as.numeric(dimnames(object@n)$time)), print_it = TRUE, ...){
-	f_time <- getFMort(object, time_range=time_range, drop=FALSE, ...)
+	f_time <- getFDynamics(object, time_range=time_range, drop=FALSE, ...)
 	f <- apply(f_time, c(2,3), mean)
 	plot_dat <- data.frame(value = c(f), Species = dimnames(f)[[1]], w = rep(object@params@w, each=nrow(object@params@species_params)))
 	p <- ggplot(plot_dat) + geom_line(aes(x=w, y = value, colour = Species, linetype=Species)) + scale_x_continuous(name = "Size", trans="log10") + scale_y_continuous(name = "Total fishing mortality", lim=c(0,max(plot_dat$value)))
@@ -372,22 +485,16 @@ setMethod('plotFMort', signature(object='MizerSim'),
 #' }
 setMethod("plot", signature(x="MizerSim", y="missing"),
     function(x, ...){
-	p1 <- plotFeedingLevel(x,print_it = FALSE,...)
-	p2 <- plotSpectra(x,print_it = FALSE,...)
-	p3 <- plotBiomass(x,print_it = FALSE,...)
-	p4 <- plotM2(x,print_it = FALSE,...)
-	p5 <- plotFMort(x,print_it = FALSE,...)
-	grid.newpage()
-	glayout <- grid.layout(3,2) # widths and heights arguments
-	vp <- viewport(layout = glayout)
-	pushViewport(vp)
-	vplayout <- function(x,y)
-	    viewport(layout.pos.row=x, layout.pos.col = y)
-	print(p1+ theme(legend.position="none"), vp = vplayout(1,1))
-	print(p3+ theme(legend.position="none"), vp = vplayout(1,2))
-	print(p4+ theme(legend.position="none"), vp = vplayout(2,1))
-	print(p5+ theme(legend.position="none"), vp = vplayout(2,2))
-	print(p2+ theme(legend.position="right", legend.key.size=unit(0.1,"cm")), vp = vplayout(3,1:2))
+	p <- vector('list')
+  p[[1]] <- plotFeedingLevel(x,print_it = FALSE,...)
+	p[[2]] <- plotSpectra(x,print_it = FALSE,...)
+	p[[3]] <- plotBiomass(x,print_it = FALSE,...)
+	p[[4]] <- plotTau(x,print_it = FALSE,...)
+	#p4 <- plotM2(x,print_it = FALSE,...)
+	#p5 <- plotFMort(x,print_it = FALSE,...)
+	
+	cowplot::plot_grid(plotlist = p,ncol = 2)
+	
     }
 )
 

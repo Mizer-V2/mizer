@@ -72,6 +72,79 @@ setMethod('getBiomass', signature(object='MizerSim'),
     }
 )
 
+
+#' Calculate the mean activity level for each species within a size range at each time step.
+#' 
+#' Calculates the total biomass through time of the species in the
+#' \code{MizerSim} class within user defined size limits. The default option is
+#' to use the whole size range. You can specify minimum and maximum weight or
+#' length range for the species. Lengths take precedence over weights (i.e. if
+#' both min_l and min_w are supplied, only min_l will be used).
+#' 
+#' @param object An object of class \code{MizerSim}.
+#' @param ... Other arguments to select the size range of the species to be used
+#'   in the calculation (min_w, max_w, min_l, max_l).
+#'
+#' @return An array containing the biomass (time x species)
+#' @export
+#' @examples
+#' \dontrun{
+#' data(NS_species_params_gears)
+#' data(inter)
+#' params <- MizerParams(NS_species_params_gears, inter)
+#' # With constant fishing effort for all gears for 20 time steps
+#' sim <- project(params, t_max = 20, effort = 0.5)
+#' getTau(sim)
+#' getTau(sim, min_w = 10, max_w = 1000_
+#' }
+setGeneric('getTaus', function(object, ...)
+  standardGeneric('getTaus'))
+
+#' @describeIn getBiomass
+setMethod('getTaus', signature(object='MizerSim'),
+          function(object, ...){
+            size_range <- get_size_range_array(object@params,...)
+            mtau <- apply(sweep(sweep(object@tau,c(2,3),size_range,"*")*object@n,c(1,2),apply(object@n,c(1,2),sum),'/'),c(1,2),sum)
+            return(mtau)
+          }
+)
+
+
+getFeedingLevelDynamics <- function(object, time_range=dimnames(object@n)$time, drop=FALSE, ...){
+ time_elements <- get_time_elements(object,time_range)
+  feed_time <- aaply(which(time_elements), 1, function(x){
+    # Necessary as we only want single time step but may only have 1 species which makes using drop impossible
+    n <- array(object@n[x,,],dim=dim(object@n)[2:3])
+    tau <- array(object@tau[x,,],dim=dim(object@tau)[2:3])
+    dimnames(n) <- dimnames(object@n)[2:3]
+    feed <- getFeedingLevel(object@params, n=n, n_pp = object@n_pp[x,],tau = tau)
+    return(feed)}, .drop=drop)
+  return(feed_time)
+  
+}
+getFDynamics <- function(object, effort, time_range=dimnames(object@effort)$time, drop=TRUE, ...){
+
+  time_elements <- get_time_elements(object,time_range, slot="effort")
+  fMort <- getFMort(object@params, object@effort, ...)
+  return(fMort[time_elements,,,drop=drop])
+  
+}
+
+getM2Dynamics <- function(object, time_range=dimnames(object@n)$time, drop=TRUE, ...){
+  time_elements <- get_time_elements(object,time_range)
+  m2_time <- aaply(which(time_elements), 1, function(x){
+    n <- array(object@n[x,,],dim=dim(object@n)[2:3])
+    dimnames(n) <- dimnames(object@n)[2:3]
+    tau <- array(object@n[x,,],dim=dim(object@tau)[2:3])
+    dimnames(tau) <- dimnames(object@tau)[2:3]
+    m2 <- getM2(object@params, n=n, n_pp = object@n_pp[x,],tau = tau)
+    return(m2)
+    
+  }, .drop=drop)
+   return(m2_time)
+  
+}
+
 #' Calculate the total abundance in terms of numbers of species within a size range
 #'
 #' Calculates the total numbers through time of the species in the

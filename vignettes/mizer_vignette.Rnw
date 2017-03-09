@@ -703,10 +703,10 @@ In the community model, recruitment is constant and there is no relationship bet
 In the trait-based model, the egg production is modeled using a ``Beverton-Holt'' type function (the default in \pkg{mizer}, see Section~\ref{sec:recruitment}) where the recruitment flux $R_i$ (numbers per time) approaches a maximum recruitment as the egg production increases.
 The maximum recruitment flux is calculated using equilibrium theory and a recruitment multiplier \citep[see][]{andersen_damped_2010}, $\kappa$ (see Equation~\ref{eq:gamma}), which can be passed in as an argument (\args{k0}) to the \code{set\_trait\_model()} function. \args{k0} has a default value of 50. 
 
-Here we set up the model to have 10 species, with asymptotic sizes ranging from 10 g to 100 kg. All the other parameters have default values. 
+Here we set up the model to have 5 species, with asymptotic sizes ranging from 10 g to 100 kg. All the other parameters have default values. 
 
 <<label=demo_trait_model_params>>=
-params <- set_trait_model(no_sp = 10, min_w_inf = 10, max_w_inf = 1e5)
+params <- set_trait_model(no_sp = 5,ks = 1.4,k = 1,delta=1e-6,n=0.9)
 @
 
 This function returns an object of type \class{MizerParams}, which holds all the model information, including species parameters.
@@ -733,7 +733,11 @@ Here we project the model for 75 time steps and without any fishing (the \args{e
 We use the default initial population abundances given by the \code{get\_initial\_n()} function so there is no need to pass in any initial population values (see Section \ref{sec:setting_initial_abundances}).
 
 <<label=trait_project_no_fishing>>=
-sim <- project(params, t_max=75, effort = 0)
+sim <-  project(params, t_max=30, effort = 0,dt=0.1,adapt_activity=F)
+sim_aa <-  project(params, t_max=100, effort = 0,dt=0.1,adapt_activity=T)
+sim_at <-  project(params, t_max=100, effort = 0,dt=0.1,adapt_activity=T,temp=seq(15,15,l=100))
+
+
 @
 
 This results in a \class{MizerSim} object which contains the abundances of the community and background resource spectra through time, as well as the original \class{MizerParams} object.
@@ -770,8 +774,7 @@ In \pkg{mizer} it is possible to include more than one fishing gear in the model
 To set up the trait-based model to have fishing we set up the \class{MizerParams} object in exactly the same way as we did before but here the \args{knife\_edge\_size} argument is explicitly passed in for clarity:
 
 <<label=set_trait_fishing>>=
-params_knife <- set_trait_model(no_sp = 10, min_w_inf = 10, max_w_inf = 1e5,
-    knife_edge_size = 1000)
+params_knife <- set_trait_model(no_sp = 5, ks = 1.2,k = 1,delta=1e-6, min_w_inf = 10, max_w_inf = 1e5, knife_edge_size = 1000)
 @
 
 First we perform a simulation without fishing in the same way we did above by setting the \args{effort} argument to 0:
@@ -811,8 +814,8 @@ As with the community model, we are interested in the relative total abundances 
 We can use the \code{apply()} function to help us:
 
 <<label = total_abund_trait>>=
-total_abund0 <- apply(sim0@n[76,,],2,sum)
-total_abund1 <- apply(sim1@n[76,,],2,sum)
+total_abund0 <- apply(sim1_F@n[76,,],2,sum)
+total_abund1 <- apply(sim2_F@n[76,,],2,sum)
 @
 
 We can then use these vectors to calculate the relative abundances:
@@ -845,8 +848,8 @@ This impact can also be seen by looking at the predation mortality by size.
 The predation mortalities are retrieved using the \code{getM2()} method for \class{MizerSim} objects. This returns a three dimensional array of predation mortalities by time x species x size (see the help page for \code{getM2()} for more details). As mentioned above, for the trait based model the predation mortality by size is the same for each species. Therefore we only look at the predation mortality of the first species. 
 
 <<label='get_M2_trait'>>=
-m2_no_fishing <- getM2(sim0)[76,1,]
-m2_with_fishing <- getM2(sim1)[76,1,]
+m2_no_fishing <- getM2Dynamics(sim1)[76,1,]
+m2_with_fishing <- getM2Dynamics(sim1_F)[76,1,]
 @
 
 The predation mortalities can then be plotted (see Figure \ref{fig:plot_m2_comm}).
@@ -1578,7 +1581,9 @@ in which each species is caught by a separate gear.
 Here we make the object again:
 
 <<label = remaking_simple_ms_params, results='hide'>>=
-params <- MizerParams(params_data, interaction = inter)
+
+params <- MizerParams(params_data,  interaction = inter)
+
 @
 
 As described above, effort is associated with fishing gears.
@@ -1588,7 +1593,7 @@ As well as thinking about the \args{effort} argument we also need to consider th
 We will project the populations forward until time equals 10 (\args{t\_max} = 10), with a time step of 0.1 (\args{dt} = 0.1), saving the output every time step (\args{t\_save} = 1). We use a constant effort value of 1.0.
 
 <<label=siple_projection_single_effort>>=
-sim <- project(params, effort = 1, t_max = 10, dt = 0.1, t_save = 1)
+sim <- project(params, effort = 1, t_max = 50, dt = 0.1, t_save = 1)
 @
 
 
@@ -2009,6 +2014,14 @@ The data is taken from \citet{blanchard_multispecies_2013}.
 Note it would probably be easier to add this data directly to the *.csv file and then read it in rather than type it in by hand like we do here:
 
 <<label=adding_sel_params>>=
+params_data$f0=0.3
+params_data$ks=1
+params_data$k=2
+params_data$k_vb[9] <- 0.16
+params_data$delta=1e-6
+#params_data$beta[params_data$beta<100] <- 100
+
+
 params_data$sel_func <- "sigmoid_length"
 params_data$l25 <- c(7.6, 9.8, 8.7, 10.1, 11.5, 19.8, 16.4, 19.8, 11.5,
     19.1, 13.2, 35.3)
@@ -2103,7 +2116,7 @@ We use this effort matrix as the \args{effort} argument to the \code{project()} 
 We use \code{dt} = 0.5 (the simulation will run faster than with the default value of 0.1, but tests show that the results are still stable) and save the results every year.
 
 <<label=project_ns_model>>=
-sim <- project(params, effort=relative_effort, dt = 0.5, t_save = 1)
+sim <- project(params, effort=relative_effort, dt = 0.2, t_save = 5)
 @
 
 Plotting the results, we can see how the biomasses of the stocks change over time (Figure~\ref{fig:plot_ns_biomass}).
